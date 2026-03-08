@@ -9,7 +9,7 @@ import java.util.concurrent.TimeUnit;
 
 public class MinioUtil {
 
-    private static final String ENDPOINT = "http://localhost:9000";
+    private static final String ENDPOINT = "http://172.30.240.1:9000";
     private static final String ACCESS_KEY = "minioadmin";
     private static final String SECRET_KEY = "minioadmin";
     private static final String BUCKET_NAME = "lbryuntuku";

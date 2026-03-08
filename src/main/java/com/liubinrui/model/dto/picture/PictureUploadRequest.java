@@ -8,9 +8,6 @@ import java.io.Serializable;
 @Data
 public class PictureUploadRequest implements Serializable {
 
-
-    private Long id;
-
     private String fileUrl;
 
     @Schema(description = "图片名称")

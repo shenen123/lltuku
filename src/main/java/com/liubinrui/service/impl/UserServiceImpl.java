@@ -95,6 +95,18 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         return this.getLoginUserVO(user);
     }
 
+    @Override
+    public boolean userLogout(HttpServletRequest request) {
+        //先判断是否已登录
+        Object userObj = request.getSession().getAttribute(USER_LOGIN_STATE);
+        User currentUser = (User) userObj;
+        if (currentUser == null || currentUser.getId() == null) {
+            throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
+        }
+        request.getSession().removeAttribute(USER_LOGIN_STATE);
+        return true;
+    }
+
     public LoginUserVO getLoginUserVO(User user) {
         if (user == null) return null;
         LoginUserVO loginUserVO = new LoginUserVO();

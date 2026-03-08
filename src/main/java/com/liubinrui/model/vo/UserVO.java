@@ -4,7 +4,6 @@ import com.liubinrui.exception.ErrorCode;
 import com.liubinrui.exception.ThrowUtils;
 import com.liubinrui.model.entity.User;
 import lombok.Data;
-import lombok.val;
 import org.springframework.beans.BeanUtils;
 
 import java.io.Serializable;
@@ -55,7 +54,7 @@ public class UserVO implements Serializable {
 
 
     public static UserVO objToVo(User user) {
-        ThrowUtils.throwIf(user!=null, ErrorCode.NOT_FOUND_ERROR);
+        ThrowUtils.throwIf(user==null, ErrorCode.NOT_FOUND_ERROR);
         UserVO userVO = new UserVO();
         BeanUtils.copyProperties(user,userVO);
         return userVO;

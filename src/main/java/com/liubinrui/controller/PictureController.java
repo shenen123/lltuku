@@ -5,13 +5,17 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.liubinrui.annotation.AuthCheck;
+import com.liubinrui.api.aliyunai.service.Text2Image;
 import com.liubinrui.common.BaseResponse;
 import com.liubinrui.common.DeleteRequest;
 import com.liubinrui.common.ResultUtils;
 import com.liubinrui.constant.UserConstant;
+import com.liubinrui.enums.PictureReviewStatusEnum;
 import com.liubinrui.exception.BusinessException;
 import com.liubinrui.exception.ErrorCode;
 import com.liubinrui.exception.ThrowUtils;
+import com.liubinrui.imagesearch.model.PictureSearchResult;
+import com.liubinrui.imagesearch.sub.ImageSearchApiFacade;
 import com.liubinrui.model.dto.picture.*;
 import com.liubinrui.model.entity.Picture;
 import com.liubinrui.model.entity.Space;
@@ -48,6 +52,9 @@ public class PictureController {
 
     @Resource
     private TransactionTemplate transactionTemplate;
+
+    @Resource
+    private Text2Image text2Image;
 
     @PostMapping("/upload/file")
     public BaseResponse<PictureVO> uploadPictureByFile(
@@ -125,8 +132,8 @@ public class PictureController {
         pictureService.checkPictureAuth(loginUser, oldPicture);
         // 3.开启事务
         transactionTemplate.executeWithoutResult(status -> {
-            //3.1
-            boolean result=pictureService.removeById(oldPicture.getId());
+            //3.1移除图片
+            boolean result = pictureService.removeById(oldPicture.getId());
             ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
             // 3.2释放额度
             Long spaceId = oldPicture.getSpaceId();
@@ -276,6 +283,96 @@ public class PictureController {
         pictureTagCategory.setTagList(tagList);
         pictureTagCategory.setCategoryList(categoryList);
         return ResultUtils.success(pictureTagCategory);
+    }
+
+    @PostMapping("/upload/batch")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Integer> uploadPictureByBatch(
+            @RequestBody PictureUploadByBatchRequest pictureUploadByBatchRequest,
+            HttpServletRequest request
+    ) {
+        ThrowUtils.throwIf(pictureUploadByBatchRequest == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        int uploadCount = pictureService.uploadPictureByBatch(pictureUploadByBatchRequest, loginUser);
+        return ResultUtils.success(uploadCount);
+    }
+
+    @PostMapping("/list/page/vo/cache")
+    public BaseResponse<Page<PictureVO>> listPictureVOByPageWithCache(@RequestBody PictureQueryRequest pictureQueryRequest,
+                                                                      HttpServletRequest request) {
+        long current = pictureQueryRequest.getCurrent();
+        long size = pictureQueryRequest.getPageSize();
+        //限制爬虫
+        ThrowUtils.throwIf(size > 20, ErrorCode.PARAMS_ERROR);
+
+        Long spaceId = pictureQueryRequest.getSpaceId();
+        if (spaceId == null) {
+            //公共空间的普通用户可以查看过审的
+            pictureQueryRequest.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
+            pictureQueryRequest.setNullSpaceId(true);
+        } else {
+            User loginUser = userService.getLoginUser(request);
+            Space space = spaceService.getById(spaceId);
+            ThrowUtils.throwIf(space == null, ErrorCode.NOT_FOUND_ERROR, "空间不存在");
+            //非空间创建者不能查看
+            if (!loginUser.getId().equals(space.getUserId()))
+                throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "没有权限");
+        }
+        Page<PictureVO> pictureVOPage = pictureService.listPictureVOByPageWithCache(pictureQueryRequest, request);
+        return ResultUtils.success(pictureVOPage);
+    }
+
+    //以图搜图
+    @PostMapping("/search/picture")
+    public BaseResponse<List<PictureSearchResult>> searchPictureByPicture(@RequestBody SearchPictureByPictureRequest searchPictureByPictureRequest) {
+        ThrowUtils.throwIf(searchPictureByPictureRequest == null, ErrorCode.PARAMS_ERROR);
+        Long pictureId = searchPictureByPictureRequest.getPictureId();
+        ThrowUtils.throwIf(pictureId == null || pictureId <= 0, ErrorCode.PARAMS_ERROR);
+        Picture oldPicture = pictureService.getById(pictureId);
+        ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR);
+        List<PictureSearchResult> resultList = ImageSearchApiFacade.searchImage(oldPicture.getUrl());
+        return ResultUtils.success(resultList);
+    }
+
+    //统一设置分类与标签
+    @PostMapping("/edit/batch")
+    public BaseResponse<Boolean> editPictureByBatch(@RequestBody PictureEditByBatchRequest pictureEditByBatchRequest, HttpServletRequest request) {
+        ThrowUtils.throwIf(pictureEditByBatchRequest == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        pictureService.batchEditPicture(pictureEditByBatchRequest, loginUser);
+        return ResultUtils.success(true);
+    }
+
+    @PostMapping("/text/image")
+    @AuthCheck(mustRole = UserConstant.VIP_ROLE)
+    public BaseResponse<String> getImageFromText(String prompt, HttpServletRequest request) {
+        // 1. 参数校验
+        ThrowUtils.throwIf(prompt == null, ErrorCode.PARAMS_ERROR);
+
+        // 2. 获取登录用户 (保持原有逻辑)
+        User loginUser = userService.getLoginUser(request);
+
+        String imageUrl;
+        try {
+            // 3. 【关键修改】包裹在 try-catch 中
+            imageUrl = text2Image.basicCall(prompt);
+        } catch (com.alibaba.dashscope.exception.NoApiKeyException e) {
+            // 处理 Key 缺失或无效的情况
+            e.printStackTrace(); // 建议打印日志以便排查
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "AI 服务配置错误：API Key 无效或未配置");
+        } catch (com.alibaba.dashscope.exception.ApiException e) {
+            // 处理 API 调用失败（如网络错误、模型报错、额度不足等）
+            e.printStackTrace();
+            // 可以根据 e.getMessage() 判断具体错误，这里统一返回系统错误
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "图片生成失败：" + e.getMessage());
+        } catch (Exception e) {
+            // 处理其他未知运行时异常
+            e.printStackTrace();
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "系统内部错误：" + e.getMessage());
+        }
+
+        // 4. 返回成功结果
+        return ResultUtils.success(imageUrl);
     }
 
 }

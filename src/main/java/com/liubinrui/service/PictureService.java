@@ -3,7 +3,9 @@ package com.liubinrui.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.liubinrui.model.dto.picture.PictureEditByBatchRequest;
 import com.liubinrui.model.dto.picture.PictureQueryRequest;
+import com.liubinrui.model.dto.picture.PictureUploadByBatchRequest;
 import com.liubinrui.model.dto.picture.PictureUploadRequest;
 import com.liubinrui.model.entity.Picture;
 import com.liubinrui.model.entity.User;
@@ -73,4 +75,21 @@ public interface PictureService extends IService<Picture> {
      * @param picture
      */
     void checkPictureAuth(User loginUser, Picture picture);
+    /**
+     * 批量抓取和创建图片
+     *
+     * @param pictureUploadByBatchRequest
+     * @param loginUser
+     * @return 成功创建的图片数
+     */
+    Integer uploadPictureByBatch(PictureUploadByBatchRequest pictureUploadByBatchRequest, User loginUser);
+    /**
+     * 获取缓存的图片列表
+     * @param pictureQueryRequest
+     * @param request
+     * @return
+     */
+    Page<PictureVO> listPictureVOByPageWithCache(PictureQueryRequest pictureQueryRequest, HttpServletRequest request);
+
+    void batchEditPicture(PictureEditByBatchRequest pictureEditByBatchRequest,User loginUser);
 }

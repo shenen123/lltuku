@@ -1,7 +1,6 @@
 package com.liubinrui.aop;
 
 import com.liubinrui.annotation.AuthCheck;
-import com.liubinrui.enums.SpaceRoleEnum;
 import com.liubinrui.enums.UserRoleEnum;
 import com.liubinrui.exception.BusinessException;
 import com.liubinrui.exception.ErrorCode;
@@ -10,7 +9,6 @@ import com.liubinrui.service.UserService;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
-import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -18,8 +16,6 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
-import java.lang.reflect.Field;
-import java.util.Map;
 
 @Aspect
 @Component
@@ -49,8 +45,7 @@ public class AuthInterceptor {
         if (userRoleEnum == null) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
         }
-        // 要求必须有管理员权限，但用户没有管理员权限，拒绝
-        if (UserRoleEnum.ADMIN.equals(mustRoleEnum) && !UserRoleEnum.ADMIN.equals(userRoleEnum)) {
+        if (userRoleEnum.getLevel() < mustRoleEnum.getLevel()) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
         }
         // 通过权限校验，放行

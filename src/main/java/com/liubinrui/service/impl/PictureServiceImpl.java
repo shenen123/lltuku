@@ -2,21 +2,28 @@ package com.liubinrui.service.impl;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.ObjUtil;
+import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.http.HttpRequest;
+import cn.hutool.http.HttpResponse;
 import cn.hutool.http.HttpUtil;
+import cn.hutool.json.JSONArray;
+import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.liubinrui.api.aliyunai.service.AiTagService;
+import com.liubinrui.api.aliyunai.service.TagCleaner;
 import com.liubinrui.constant.CommonConstant;
 import com.liubinrui.enums.PictureReviewStatusEnum;
 import com.liubinrui.exception.BusinessException;
 import com.liubinrui.exception.ErrorCode;
 import com.liubinrui.exception.ThrowUtils;
 import com.liubinrui.mapper.PictureMapper;
-import com.liubinrui.model.dto.picture.ImageInfo;
-import com.liubinrui.model.dto.picture.PictureQueryRequest;
-import com.liubinrui.model.dto.picture.PictureUploadRequest;
-import com.liubinrui.model.dto.picture.UploadResult;
+import com.liubinrui.model.dto.picture.*;
 import com.liubinrui.model.entity.Picture;
 import com.liubinrui.model.entity.Space;
 import com.liubinrui.model.entity.User;
@@ -31,8 +38,12 @@ import com.liubinrui.utils.SqlUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ObjectUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.redisson.api.RBucket;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.DigestUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.annotation.Resource;
@@ -45,7 +56,10 @@ import java.io.InputStream;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLConnection;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -54,8 +68,14 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture> impl
 
     @Resource
     private UserService userService;
+    @Resource
     private SpaceService spaceService;
-
+    @Resource
+    private RedissonClient redissonClient;
+    @Resource
+    private AiTagService aiTagService;
+    @Resource
+    private TagCleaner tagCleaner;
     @Override
     public void validPicture(Picture picture, boolean add) {
         ThrowUtils.throwIf(picture == null, ErrorCode.PARAMS_ERROR);
@@ -81,10 +101,12 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture> impl
         String searchText = pictureQueryRequest.getSearchText();
         Long userId = pictureQueryRequest.getUserId();
         Long spaceId = pictureQueryRequest.getSpaceId();
+        Integer reviewStatus = pictureQueryRequest.getReviewStatus();
         String sortField = pictureQueryRequest.getSortField();
         String sortOrder = pictureQueryRequest.getSortOrder();
         List<String> tagList = pictureQueryRequest.getTags();
-
+        Date startEditTime = pictureQueryRequest.getStartEditTime();
+        Date endEditTime=pictureQueryRequest.getEndEditTime();
         if (StringUtils.isNotBlank(searchText)) {
             // 需要拼接查询条件
             queryWrapper.and(qw -> qw.like("name", searchText).or().like("introduction", searchText));
@@ -102,7 +124,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture> impl
         //精确查询
         queryWrapper.eq(ObjectUtils.isNotEmpty(id), "id", id);
         queryWrapper.eq(ObjectUtils.isNotEmpty(userId), "user_id", userId);
-        queryWrapper.eq(ObjectUtils.isNotEmpty(userId), "space_id", spaceId);
+        queryWrapper.eq(ObjectUtils.isNotEmpty(spaceId), "space_id", spaceId);
+        queryWrapper.eq(reviewStatus != null && reviewStatus > 0, "review_status", reviewStatus);
+        queryWrapper.ge(ObjUtil.isNotEmpty(startEditTime), "editTime", startEditTime);
+        queryWrapper.lt(ObjUtil.isNotEmpty(endEditTime), "editTime", endEditTime);
         // 排序规则
         queryWrapper.orderBy(SqlUtils.validSortField(sortField),
                 sortOrder.equals(CommonConstant.SORT_ORDER_ASC),
@@ -127,6 +152,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture> impl
 
     @Override
     public Page<PictureVO> getPictureVOPage(Page<Picture> picturePage, HttpServletRequest request) {
+
         List<Picture> pictureList = picturePage.getRecords();
         Page<PictureVO> pictureVOPage = new Page<>(picturePage.getCurrent(), picturePage.getSize(), picturePage.getTotal());
         if (CollUtil.isEmpty(pictureList)) {
@@ -136,14 +162,18 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture> impl
         List<PictureVO> pictureVOList = pictureList.stream().map
                 (picture -> PictureVO.objToVo(picture)).collect(Collectors.toList());
 
-        Set<Long> userIdSet = pictureList.stream().map(Picture::getUserId).collect(Collectors.toSet());
+        Set<Long> userIdSet = pictureList.stream().map(Picture::getUserId).filter(Objects::nonNull) // 过滤 null
+                .filter(id -> id != 0).collect(Collectors.toSet());
         Map<Long, List<User>> userIdUserListMap = userService.listByIds(userIdSet).stream()
                 .collect(Collectors.groupingBy(User::getId));
         pictureVOList.forEach(pictureVO -> {
             Long userId = pictureVO.getUserId();
             User user = new User();
-            if (userIdUserListMap.containsKey(userId))
+            if (userIdUserListMap.containsKey(userId)) {
+                user = userService.getById(userId);
                 pictureVO.setUser(UserVO.objToVo(user));
+            }
+
         });
         pictureVOPage.setRecords(pictureVOList);
         return pictureVOPage;
@@ -165,15 +195,12 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture> impl
     }
 
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public PictureVO uploadPicture(MultipartFile file, String imageUrl,
                                    PictureUploadRequest pictureUploadRequest, User loginUser) {
         //1.参数校验
-        boolean hasFile = file != null && !file.isEmpty();
-        boolean hasUrl = StrUtil.isNotBlank(imageUrl);
-        if (!(hasFile || hasUrl)) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "请上传文件或提供图片 URL，二者选其一");
-        }
+        ThrowUtils.throwIf((file == null && StrUtil.isBlank(imageUrl)),
+                ErrorCode.PARAMS_ERROR, "请上传文件或提供图片 URL，二者选其一");
         //2.空间检验
         Long spaceId = pictureUploadRequest.getSpaceId();
         if (spaceId != null) {
@@ -191,14 +218,18 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture> impl
                 throw new BusinessException(ErrorCode.OPERATION_ERROR, "空间存储容量不足");
         }
         //3.公共空间，统一上传
-        UploadResult result = hasFile ?
+        UploadResult result = (file != null) ?
                 handleFileUpload(file, loginUser.getId())
                 : handleUrlUpload(imageUrl, loginUser.getId());
         //4.获取原图URL（用于下载）
         String presignedUrl = MinioUtil.getPresignedUrl(result.getOriginalObjectName(), 7 * 24 * 3600);
+        String objectKey = result.getOriginalObjectName();
         // 5.获取缩略图 URL（用于前端展示）
         String thumbPresignedUrl = MinioUtil.getPresignedUrl(result.getThumbnailObjectName(), 7 * 24 * 3600);
-        // 6.构建实体，把刚才获得的补充进去
+        // 6.生成标签
+        //List<String>beginTags=aiTagService.generateTags(file);
+        //List<String>endTags=tagCleaner.cleanTags(beginTags);
+        // 7.构建实体，把刚才获得的补充进去
         Picture picture = new Picture();
         picture.setUrl(presignedUrl);
         picture.setThumbUrl(thumbPresignedUrl);
@@ -213,6 +244,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture> impl
         picture.setUserId(loginUser.getId());
         picture.setCreateTime(new Date());
         picture.setEditTime(new Date());
+        //picture.setTagsJson(JSONUtil.toJsonStr(endTags));
         if (spaceId != null)
             picture.setSpaceId(spaceId);
         // 7.保存到数据库
@@ -255,7 +287,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture> impl
             thumbInfo.setWidth(thumbImage.getWidth());
             thumbInfo.setHeight(thumbImage.getHeight());
 
-            // 4. 生成对象入库名
+            // 4. 生成对象入Minio库名
             String originalObjectName = generateObjectName(userId, ext);
             String thumbnailObjectName = generateObjectName(userId, "jpeg"); // 缩略图统一用 .jpeg
             // 5. 上传原图
@@ -264,7 +296,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture> impl
             }
             // 6. 上传缩略图（content-type 固定为 image/jpeg）
             try (InputStream thumbIs = new ByteArrayInputStream(thumbBytes)) {
-                MinioUtil.upload(originalObjectName, "image/jpeg", thumbIs);
+                MinioUtil.upload(thumbnailObjectName, "image/jpeg", thumbIs);
             }
 
             // 7. 构建结果（你需要扩展 UploadResult 构造函数或 setter）
@@ -328,7 +360,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture> impl
         BufferedImage originalImage;
         try {
             bis = new ByteArrayInputStream((bytes));
-            originalImage = ImageIO.read(bis);
+            originalImage = ImageIO.read(bis);   //会直接读到末尾，导致上传时大小为空
             if (originalImage == null) {
                 throw new BusinessException(ErrorCode.PARAMS_ERROR, "无法识别的图片格式");
             }
@@ -357,16 +389,16 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture> impl
         String thumbnailObjectName = generateObjectName(userId, "jpeg");
 
         //8.上传原图
-        try {
-            MinioUtil.upload(originalObjectName, contentType, bis);
+        try (InputStream uploadOriginalIs = new ByteArrayInputStream(bytes)) {
+            MinioUtil.upload(originalObjectName, contentType, uploadOriginalIs);
         } catch (Exception e) {
             log.error("MinIO 原图上传失败: {}", imageUrl, e);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "原图存储失败");
         }
 
         // 9. 上传缩略图
-        try {
-            MinioUtil.upload(thumbnailObjectName, "image/jpeg", ths);
+        try (InputStream uploadThumbIs = new ByteArrayInputStream(thumbBytes)) {
+            MinioUtil.upload(thumbnailObjectName, "image/jpeg", uploadThumbIs);
         } catch (Exception e) {
             log.error("MinIO 缩略图上传失败: {}", imageUrl, e);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "缩略图存储失败");
@@ -449,12 +481,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture> impl
         if (contentType == null) {
             return ".jpg";
         }
-
         // 统一转为小写并去除参数以及去除首尾空格（如 "image/jpeg; charset=UTF-8" → "image/jpeg"）
         String type = contentType.toLowerCase().split(";")[0].trim();
-
         Map<String, String> mimeToExt = new HashMap<>();
-        mimeToExt.put("image/jpeg", ".jepg");
+        mimeToExt.put("image/jpeg", ".jpg");
         mimeToExt.put("image/jpg", ".jpg");
         mimeToExt.put("image/png", ".png");
         mimeToExt.put("image/gif", ".gif");
@@ -491,4 +521,321 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture> impl
 //            }
         }
     }
+
+    @Override
+    public Integer uploadPictureByBatch(PictureUploadByBatchRequest pictureUploadByBatchRequest, User loginUser) {
+        ThrowUtils.throwIf(pictureUploadByBatchRequest == null, ErrorCode.NOT_FOUND_ERROR);
+        //1.构造搜索词
+        String searchText = pictureUploadByBatchRequest.getSearchText();
+        if (StrUtil.isBlank(searchText)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "搜索关键词不能为空");
+        }
+        // 2.指定数量
+        Integer count = Math.min(pictureUploadByBatchRequest.getCount(), 30);
+
+        // 3.构造 Pexels API URL
+        String encodedQuery = URLEncoder.encode(searchText, StandardCharsets.UTF_8);
+        String apiUrl = "https://api.pexels.com/v1/search?query=" + encodedQuery + "&per_page=" + count;
+
+        // 4.调用 Pexels API
+        HttpResponse response;
+        try {
+            response = HttpRequest.get(apiUrl)
+                    .header("Authorization", "rBA7HZvsESnDgbr3H3KqyE5ilPXN35MJSDiRk8lEmNmWb2uPspMcdZ88")
+                    .timeout(10000) // 10秒超时
+                    .execute();
+        } catch (Exception e) {
+            log.error("请求 Pexels API 失败", e);
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "图片服务暂时不可用");
+        }
+        // 6. 解析 JSON 响应（使用 Hutool）
+        JSONObject jsonResponse;
+        try {
+            jsonResponse = JSONUtil.parseObj(response.body()); // ← 替换 Fastjson
+        } catch (Exception e) {
+            log.error("解析 Pexels 响应失败: {}", response.body(), e);
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "图片服务返回格式异常");
+        }
+        // 7. 提取图片列表
+        JSONArray photos = jsonResponse.getJSONArray("photos");
+        if (photos == null || photos.isEmpty()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "未找到相关图片");
+        }
+        // 8. 批量上传
+        int uploadCount = 0;  //记录成功上传多少张
+        //如果用户没填名字前缀，就用搜索词作为默认前缀；如果填了，就用用户填的
+        String namePrefix = StrUtil.blankToDefault(pictureUploadByBatchRequest.getNamePrefix(), searchText);
+
+        for (int i = 0; i < photos.size() && uploadCount < count; i++) {
+            try {
+                JSONObject photo = photos.getJSONObject(i);
+                JSONObject src = photo.getJSONObject("src");
+                // 使用 getStr() 而不是 getString()
+                String fileUrl = src.getStr("medium"); // 中等分辨率
+
+                if (StrUtil.isBlank(fileUrl)) {
+                    log.warn("跳过空图片 URL: photoId={}", photo.getStr("id"));
+                    continue;
+                }
+
+                // 构造上传请求
+                PictureUploadRequest uploadRequest = new PictureUploadRequest();
+                uploadRequest.setPicName(namePrefix + (uploadCount + 1));
+
+                // 执行上传
+                PictureVO pictureVO = this.uploadPicture(null, fileUrl, uploadRequest, loginUser);
+                log.info("图片上传成功, id = {}, url = {}", pictureVO.getId(), fileUrl);
+                uploadCount++;
+
+            } catch (Exception e) {
+                log.warn("单张图片上传失败，继续下一张", e);
+            }
+        }
+
+        return uploadCount;
+    }
+
+    private final Cache<String, String> LOCAL_CACHE =
+            Caffeine.newBuilder().initialCapacity(1024)
+                    .maximumSize(10000L)
+                    // 缓存 5 分钟移除
+                    .expireAfterWrite(5L, TimeUnit.MINUTES)
+                    .build();
+    private static final String EMPTY_PAGE_JSON = JSONUtil.toJsonStr(new Page<PictureVO>());
+
+    @Override
+    public Page<PictureVO> listPictureVOByPageWithCache(PictureQueryRequest pictureQueryRequest, HttpServletRequest request) {
+        //1.数据检验并构造缓存
+        ThrowUtils.throwIf(pictureQueryRequest == null, ErrorCode.NOT_FOUND_ERROR);
+        String queryCondition = JSONUtil.toJsonStr(pictureQueryRequest);
+        String hashKey = DigestUtils.md5DigestAsHex(queryCondition.getBytes());
+        String cacheKey = "lbrpicture:listPictureVOByPage:" + hashKey;
+
+        //2.查询本地缓存
+        String cachedValue = LOCAL_CACHE.getIfPresent(hashKey);
+        if (cachedValue != null) {
+            Page<PictureVO> page = parsePage(cachedValue);
+            if (page != null) return page;
+        }
+
+        // 3. 查询分布式缓存（Redis）
+        RBucket<String> bucket = redissonClient.getBucket(cacheKey);
+        cachedValue = bucket.get();
+        if (cachedValue != null) {
+            LOCAL_CACHE.put(hashKey, cachedValue); // 回填本地缓存
+            Page<PictureVO> page = parsePage(cachedValue);
+            if (page != null) return page;
+        }
+
+        // 4. 【防击穿】加分布式锁
+        String lockKey = "lock:picture:list:" + cacheKey;
+        RLock lock = redissonClient.getLock(lockKey);
+        try {
+            // 5.尝试获取锁（等待1秒，自动释放30秒）
+            boolean isLocked = lock.tryLock(1, 30, TimeUnit.SECONDS);
+            if (!isLocked) {
+                // 获取锁失败：短暂等待后重试（避免大量线程同时失败）
+                Thread.sleep(50);
+                return listPictureVOByPageWithCache(pictureQueryRequest, request);
+            }
+
+            //6.【双重检测】：可能其他线程已重建缓存
+            bucket = redissonClient.getBucket(cacheKey);
+            cachedValue = bucket.get();
+            if (cachedValue != null) {
+                Page<PictureVO> page = parsePage(cachedValue);
+                return page;
+            }
+
+            // 7.都没有，查询数据库
+            Page<Picture> picturePage = this.page(new Page<>(pictureQueryRequest.getCurrent(),
+                            pictureQueryRequest.getPageSize()),
+                    this.getQueryWrapper(pictureQueryRequest));
+
+            Page<PictureVO> pictureVOPage = this.getPictureVOPage(picturePage, request);
+
+            //8.空结果也缓存
+            String cacheValue;
+            int ttlSeconds;
+            if (pictureVOPage == null || pictureVOPage.getRecords().isEmpty()) {
+                cacheValue = EMPTY_PAGE_JSON;
+                ttlSeconds = 60;
+            } else {
+                cacheValue = JSONUtil.toJsonStr(pictureVOPage);
+                // 【防雪崩】随机 TTL：5～7 分钟
+                ttlSeconds = 300 + RandomUtil.randomInt(0, 121);
+            }
+
+            // 9. 更新两级缓存
+            LOCAL_CACHE.put(hashKey, cachedValue);
+            redissonClient.getBucket(cacheKey).set(cacheValue, ttlSeconds, TimeUnit.SECONDS);
+            return pictureVOPage;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("获取分布式锁被中断", e);
+        } finally {
+            // 10.释放锁
+            if (lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
+        }
+    }
+
+    private Page<PictureVO> parsePage(String json) {
+        if (json == null || json.isEmpty()) return null;
+
+        try {
+            JSONObject root = JSONUtil.parseObj(json);
+//            结构如下
+//            {
+//                "current": 1,
+//                    "size": 10,
+//                    "total": 100,
+//                    "pages": 10,
+//                    "records": [ { ... }, { ... } ]
+//            }
+            Page<PictureVO> page = new Page<>();
+            //缺少返回默认值
+            page.setCurrent(root.getLong("current", 1L));
+            page.setSize(root.getLong("size", 10L));
+            page.setTotal(root.getLong("total", 0L));
+            page.setPages(root.getLong("pages", 0L));
+            // 安全获取records数组，如果不存在，recordsArr 为 null，跳过循环，返回一个空列表的 Page
+            JSONArray recordsArr = root.getJSONArray("records");
+            List<PictureVO> records = new ArrayList<>();
+            if (recordsArr != null) {
+                for (Object obj : recordsArr) {
+                    // obj 可能是 JSONObject 或 Map
+                    PictureVO vo = JSONUtil.toBean(JSONUtil.toJsonStr(obj), PictureVO.class);
+                    //先把当前的对象（无论它是 Map 还是 JSONObject）重新序列化回 JSON 字符串
+                    //再把这个字符串反序列化成真正的 PictureVO Java 对象。
+                    records.add(vo);
+                }
+            }
+            page.setRecords(records);
+            return page;
+        } catch (Exception e) {
+            log.error("解析缓存分页失败", e);
+            return null;
+        }
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void editPictureByBatch(PictureEditByBatchRequest pictureEditByBatchRequest, User loginUser) {
+        List<Long> pictureIdList = pictureEditByBatchRequest.getPictureIdList();
+        Long spaceId = pictureEditByBatchRequest.getSpaceId();
+        String category = pictureEditByBatchRequest.getCategory();
+        List<String> tags = pictureEditByBatchRequest.getTags();
+
+        // 1. 校验参数
+        ThrowUtils.throwIf(spaceId == null || CollUtil.isEmpty(pictureIdList), ErrorCode.PARAMS_ERROR);
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NO_AUTH_ERROR);
+        // 2. 校验空间权限
+        Space space = spaceService.getById(spaceId);
+        ThrowUtils.throwIf(space == null, ErrorCode.NOT_FOUND_ERROR, "空间不存在");
+        if (!loginUser.getId().equals(space.getUserId())) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "没有空间访问权限");
+        }
+
+        // 3. 查询指定图片，仅选择需要的字段
+        List<Picture> pictureList = this.lambdaQuery()
+                .select(Picture::getId, Picture::getSpaceId)
+                .eq(Picture::getSpaceId, spaceId)
+                .in(Picture::getId, pictureIdList)
+                .list();
+
+        if (pictureList.isEmpty()) {
+            return;
+        }
+        // 4. 更新分类和标签
+        pictureList.forEach(picture -> {
+            if (StrUtil.isNotBlank(category)) {
+                picture.setCategory(category);
+            }
+            if (CollUtil.isNotEmpty(tags)) {
+                picture.setTagsJson(JSONUtil.toJsonStr(tags));
+            }
+        });
+
+        // 5. 批量更新
+        boolean result = this.updateBatchById(pictureList);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void batchEditPicture(PictureEditByBatchRequest pictureEditByBatchRequest, User loginUser) {
+        // 1. 参数校验 (保持不变)
+        List<Long> pictureIdList = pictureEditByBatchRequest.getPictureIdList();
+        Long spaceId = pictureEditByBatchRequest.getSpaceId();
+        String nameRule = pictureEditByBatchRequest.getNameRule();
+
+        ThrowUtils.throwIf(spaceId == null || CollUtil.isEmpty(pictureIdList), ErrorCode.PARAMS_ERROR);
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NO_AUTH_ERROR);
+
+        // 2. 校验空间权限 (保持不变)
+        Space space = spaceService.getById(spaceId);
+        ThrowUtils.throwIf(space == null, ErrorCode.NOT_FOUND_ERROR, "空间不存在");
+        if (!loginUser.getId().equals(space.getUserId())) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "没有空间访问权限");
+        }
+
+        // 3. 查询图片 (保持不变)
+        List<Picture> pictureList = this.lambdaQuery()
+                .eq(Picture::getSpaceId, spaceId)
+                .in(Picture::getId, pictureIdList)
+                .list();
+
+        fillPictureWithNameRule(pictureList, nameRule);
+
+        if (pictureList.isEmpty()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "指定的图片不存在或不属于该空间");
+        }
+
+        // 4. 【核心修改】同步分批处理，确保在同一个事务中
+        // 如果任何一批失败，整个方法抛出异常，Spring 会自动回滚所有操作
+        int batchSize = 100;
+        // 提前准备好要更新的数据，避免在循环中重复判断
+        String targetCategory = pictureEditByBatchRequest.getCategory();
+        String targetTags = (pictureEditByBatchRequest.getTags() != null)
+                ? String.join(",", pictureEditByBatchRequest.getTags())
+                : null;
+
+        for (int i = 0; i < pictureList.size(); i += batchSize) {
+            List<Picture> batch = pictureList.subList(i, Math.min(i + batchSize, pictureList.size()));
+
+            for (Picture picture : batch) {
+                if (targetCategory != null) {
+                    picture.setCategory(targetCategory);
+                }
+                if (targetTags != null) {
+                    picture.setTagsJson(targetTags);
+                }
+            }
+
+            // 执行更新，如果失败会抛出异常，触发 @Transactional 回滚
+            boolean result = this.updateBatchById(batch);
+            if (!result) {
+                throw new BusinessException(ErrorCode.OPERATION_ERROR, "批量更新图片失败，第 " + (i/batchSize + 1) + " 批");
+            }
+        }
+
+        // 方法正常结束，Spring 提交事务
+    }
+
+    private void fillPictureWithNameRule(List<Picture> pictureList, String nameRule) {
+        if (CollUtil.isEmpty(pictureList) || StrUtil.isBlank(nameRule)) {
+            return;
+        }
+        long count = 1;
+        try {
+            for (Picture picture : pictureList) {
+                String pictureName = nameRule.replaceAll("\\{序号}", String.valueOf(count++));
+                picture.setName(pictureName);
+            }
+        } catch (Exception e) {
+            log.error("名称解析错误", e);
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "名称解析错误");
+        }
+    }
+
 }

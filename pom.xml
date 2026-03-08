@@ -36,6 +36,13 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
+        <!-- 或者使用通用的 HTTP 客户端，如 OkHttp -->
+        <!--jsoup依赖-->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.17.2</version>
+        </dependency>
         <dependency>
             <groupId>com.mysql</groupId>
             <artifactId>mysql-connector-j</artifactId>
@@ -44,6 +51,7 @@
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
+            <version>1.18.30</version>
             <optional>true</optional>
         </dependency>
 
@@ -52,12 +60,29 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
-
+        <!--OkHttp-->
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>okhttp</artifactId>
+            <version>4.12.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.fastjson2</groupId> <!-- 用于解析 JSON -->
+            <artifactId>fastjson2</artifactId>
+            <version>2.0.53</version>
+        </dependency>
         <!-- MyBatis Plus -->
         <dependency>
             <groupId>com.baomidou</groupId>
             <artifactId>mybatis-plus-boot-starter</artifactId>
-            <version>3.5.9</version>
+            <version>3.5.1</version>
+        </dependency>
+
+        <!-- alibaba -->
+        <dependency>
+            <groupId>com.alibaba</groupId>
+            <artifactId>dashscope-sdk-java</artifactId>
+            <version>2.16.0</version>
         </dependency>
 
         <!-- Hutool -->
@@ -84,6 +109,7 @@
             <artifactId>knife4j-openapi3-spring-boot-starter</artifactId>
             <version>4.4.0</version>
         </dependency>
+
         <!-- AOP -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -97,6 +123,19 @@
             <version>0.4.20</version>
         </dependency>
 
+        <!-- Redisson Starter（它已包含 Redis 功能） -->
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson-spring-boot-starter</artifactId>
+            <version>3.21.0</version>
+        </dependency>
+
+        <!-- Caffeine (本地缓存) -->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+            <version>3.1.8</version>
+        </dependency>
         <!-- MinIO -->
         <dependency>
             <groupId>io.minio</groupId>

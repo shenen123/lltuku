@@ -1,36 +1,33 @@
 package com.liubinrui.enums;
 
-import cn.hutool.core.util.ObjUtil;
 import lombok.Getter;
 
 @Getter
 public enum UserRoleEnum {
-
-    USER("用户", "user"),
-    ADMIN("管理员", "admin");
+    USER("用户", "user", 0),
+    VIP("会员", "vip", 1),  // 新增 VIP，等级为 1
+    ADMIN("管理员", "admin", 2);
 
     private final String text;
-
     private final String value;
+    private final int level; // 新增等级字段
 
-    UserRoleEnum(String text, String value) {
+    UserRoleEnum(String text, String value, int level) {
         this.text = text;
         this.value = value;
+        this.level = level;
     }
 
-    /**
-     * 根据 value 获取枚举
-     *
-     * @param value 枚举值的value
-     * @return 枚举值
-     */
+    public String getValue() { return value; }
+
+    // 新增获取等级的方法
+    public int getLevel() { return level; }
+
     public static UserRoleEnum getEnumByValue(String value) {
-        if (ObjUtil.isEmpty(value)) {
-            return null;
-        }
-        for (UserRoleEnum anEnum : UserRoleEnum.values()) {
-            if (anEnum.value.equals(value)) {
-                return anEnum;
+        if (value == null) return null;
+        for (UserRoleEnum item : values()) {
+            if (item.value.equals(value)) {
+                return item;
             }
         }
         return null;
