@@ -140,8 +140,8 @@ public class PictureController {
             if (spaceId != null) {
                 boolean update = spaceService.lambdaUpdate()
                         .eq(Space::getId, spaceId)
-                        .setSql("totalSize = totalSize - " + oldPicture.getPicSize())
-                        .setSql("totalCount = totalCount - 1")
+                        .setSql("total_size = total_size - " + oldPicture.getPicSize())
+                        .setSql("total_count = total_count - 1")
                         .update();
                 ThrowUtils.throwIf(!update, ErrorCode.OPERATION_ERROR, "额度更新失败");
             }

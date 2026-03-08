@@ -40,9 +40,17 @@ public class SpaceServiceImpl extends ServiceImpl<SpaceMapper, Space> implements
         ThrowUtils.throwIf(space == null, ErrorCode.PARAMS_ERROR);
         // 创建数据时，参数不能为空
         if (add) {
-            ThrowUtils.throwIf(space.getSpaceName()==null,ErrorCode.NOT_FOUND_ERROR,"参数不能为空");
-            ThrowUtils.throwIf(space.getSpaceLevel()==null,ErrorCode.NOT_FOUND_ERROR,"参数不能为空");
+            ThrowUtils.throwIf(space.getSpaceName() == null, ErrorCode.NOT_FOUND_ERROR, "参数不能为空");
+            ThrowUtils.throwIf(space.getSpaceLevel() == null, ErrorCode.NOT_FOUND_ERROR, "参数不能为空");
         }
+    }
+
+    public void checkSpaceAuth(User user, Space space) {
+        //参数检验
+        ThrowUtils.throwIf(user == null || space == null, ErrorCode.PARAMS_ERROR, "用户或空间为空");
+        //检查是不是空间的创建者
+        ThrowUtils.throwIf(!space.getUserId().equals(user.getId()), ErrorCode.NO_AUTH_ERROR);
+
     }
 
     @Override

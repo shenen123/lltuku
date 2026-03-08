@@ -7,6 +7,7 @@ import com.liubinrui.common.BaseResponse;
 import com.liubinrui.common.DeleteRequest;
 import com.liubinrui.common.ResultUtils;
 import com.liubinrui.constant.UserConstant;
+import com.liubinrui.enums.SpaceLevelEnum;
 import com.liubinrui.exception.BusinessException;
 import com.liubinrui.exception.ErrorCode;
 import com.liubinrui.exception.ThrowUtils;
@@ -39,15 +40,21 @@ public class SpaceController {
 
     @PostMapping("/add")
     public BaseResponse<Long> addSpace(@RequestBody SpaceAddRequest spaceAddRequest, HttpServletRequest request) {
+     String spaceName = spaceAddRequest.getSpaceName();
+     Integer spaceLevel = spaceAddRequest.getSpaceLevel();
+     Integer spaceType = spaceAddRequest.getSpaceType();
+
+
         ThrowUtils.throwIf(spaceAddRequest == null, ErrorCode.PARAMS_ERROR);
-        // todo 在此处将实体类和 DTO 进行转换
         Space space = new Space();
         BeanUtils.copyProperties(spaceAddRequest, space);
         // 数据校验
         spaceService.validSpace(space, true);
-        // todo 填充默认值
         User loginUser = userService.getLoginUser(request);
         space.setUserId(loginUser.getId());
+        //设置最大空间和最大数量
+        space.setMaxCount(SpaceLevelEnum.getEnumByValue(spaceLevel).getMaxCount());
+        space.setMaxSize(SpaceLevelEnum.getEnumByValue(spaceLevel).getMaxSize());
         // 写入数据库
         boolean result = spaceService.save(space);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);

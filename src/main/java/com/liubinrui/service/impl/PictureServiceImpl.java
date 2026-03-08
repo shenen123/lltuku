@@ -205,7 +205,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture> impl
         Long spaceId = pictureUploadRequest.getSpaceId();
         if (spaceId != null) {
             Space space = spaceService.getById(spaceId);
-            ThrowUtils.throwIf(ObjUtil.isNotNull(space), ErrorCode.NOT_FOUND_ERROR, "访问空间不存在");
+            ThrowUtils.throwIf(ObjUtil.isNull(space), ErrorCode.NOT_FOUND_ERROR, "访问空间不存在");
             //2.1 私有的必须是空间创建者
             if (space.getSpaceType() == 0) {
                 if (!loginUser.getId().equals(space.getUserId()))
@@ -253,8 +253,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture> impl
         // 8.更新空间额度（如果关联了空间）
         if (spaceId != null) {
             boolean updated = spaceService.lambdaUpdate().eq(Space::getId, spaceId)
-                    .setSql("totalSize = totalSize + " + result.getOriginalSize())
-                    .setSql("totalCount = totalCount + 1")
+                    .setSql("total_size = total_size + " + result.getOriginalSize())
+                    .setSql("total_count = total_count + 1")
                     .update();
             ThrowUtils.throwIf(!updated, ErrorCode.OPERATION_ERROR, "空间额度更新失败");
         }
@@ -403,6 +403,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture> impl
             log.error("MinIO 缩略图上传失败: {}", imageUrl, e);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "缩略图存储失败");
         }
+
         // 10. 构建结果
         UploadResult uploadResult = new UploadResult();
         uploadResult.setOriginalObjectName(originalObjectName);

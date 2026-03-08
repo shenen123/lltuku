@@ -1,24 +1,17 @@
 package com.liubinrui.model.vo.space;
+
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.io.Serializable;
+
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
-public class SpaceUserAnalyzeResponse implements Serializable {
-
-    /**
-     * 时间区间
-     */
-    private Long userId;
-
-    /**
-     * 上传数量
-     */
-    private Long count;
-
+public class SpaceBankAnalyzeResponse implements Serializable {
+    private Long spaceId;
+    private Double sizeRate;
     private static final long serialVersionUID = 1L;
-}
 
+}
