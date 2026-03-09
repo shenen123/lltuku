@@ -23,7 +23,7 @@ public interface PictureService extends IService<Picture> {
      * @param picture
      * @param add 对创建的数据进行校验
      */
-    void validPicture(Picture picture, boolean add);
+    //void validPicture(Picture picture, boolean add);
 
     /**
      * 上传图片
@@ -91,5 +91,10 @@ public interface PictureService extends IService<Picture> {
      */
     Page<PictureVO> listPictureVOByPageWithCache(PictureQueryRequest pictureQueryRequest, HttpServletRequest request);
 
+    /**
+     *批量编辑图片
+     * @param pictureEditByBatchRequest
+     * @param loginUser
+     */
     void batchEditPicture(PictureEditByBatchRequest pictureEditByBatchRequest,User loginUser);
 }

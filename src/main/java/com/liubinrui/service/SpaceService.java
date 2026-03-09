@@ -3,6 +3,7 @@ package com.liubinrui.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.liubinrui.model.dto.space.SpaceAddRequest;
 import com.liubinrui.model.dto.space.SpaceQueryRequest;
 import com.liubinrui.model.entity.Space;
 import com.liubinrui.model.entity.User;
@@ -12,20 +13,29 @@ import com.liubinrui.model.vo.SpaceVO;
 import javax.servlet.http.HttpServletRequest;
 
 public interface SpaceService extends IService<Space> {
+    /**
+     * 限制空间数量
+     * @param userId
+     * @param targetType
+     */
+    void checkSpaceLimit(Long userId, Integer targetType);
 
     /**
      * 校验数据
+     *
      * @param space
-     * @param add 对创建的数据进行校验
+     * @param add   对创建的数据进行校验
      */
     void validSpace(Space space, boolean add);
 
     /**
      * 权限校验
+     *
      * @param user
      * @param space
      */
     void checkSpaceAuth(User user, Space space);
+
     /**
      * 获取查询条件
      *
@@ -33,7 +43,7 @@ public interface SpaceService extends IService<Space> {
      * @return
      */
     QueryWrapper<Space> getQueryWrapper(SpaceQueryRequest spaceQueryRequest);
-    
+
     /**
      * 获取空间封装
      *
@@ -51,4 +61,12 @@ public interface SpaceService extends IService<Space> {
      * @return
      */
     Page<SpaceVO> getSpaceVOPage(Page<Space> spacePage, HttpServletRequest request);
+
+    Long addSpace(SpaceAddRequest spaceAddRequest, User loginUser);
+
+    /**
+     *
+     */
+    boolean isTeamSpace(Long spaceId);
+
 }

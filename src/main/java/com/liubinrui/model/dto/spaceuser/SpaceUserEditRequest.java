@@ -9,14 +9,14 @@ import java.io.Serializable;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
-public class SpaceUserUpdateRequest implements Serializable {
+
+public class SpaceUserEditRequest implements Serializable {
 
     /**
-     * 空间成员id
+     * id
      */
     private Long id;
 
-    private Long spaceId;
     /**
      * 空间角色：viewer/editor/admin
      */

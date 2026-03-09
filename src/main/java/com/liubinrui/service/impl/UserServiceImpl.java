@@ -1,5 +1,6 @@
 package com.liubinrui.service.impl;
 
+import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -11,15 +12,19 @@ import com.liubinrui.exception.BusinessException;
 import com.liubinrui.exception.ErrorCode;
 import com.liubinrui.exception.ThrowUtils;
 import com.liubinrui.mapper.UserMapper;
+import com.liubinrui.model.dto.space.SpaceAddRequest;
 import com.liubinrui.model.dto.user.UserQueryRequest;
 import com.liubinrui.model.entity.User;
 import com.liubinrui.model.vo.LoginUserVO;
 import com.liubinrui.model.vo.UserVO;
+import com.liubinrui.service.SpaceService;
 import com.liubinrui.service.UserService;
 import com.liubinrui.utils.SqlUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ObjectUtils;
 import org.springframework.beans.BeanUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.util.DigestUtils;
 
@@ -33,6 +38,10 @@ import static com.liubinrui.constant.UserConstant.USER_LOGIN_STATE;
 @Service
 @Slf4j
 public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements UserService {
+    @Autowired
+    @Lazy
+    private SpaceService spaceService;
+
     @Override
     public long userRegister(String userAccount, String userPassword, String checkPassword) {
         //检验非空
@@ -48,7 +57,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         QueryWrapper<User> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("user_account", userAccount);
         Long count = this.baseMapper.selectCount(queryWrapper);
-        if (count > 0) throw new BusinessException(ErrorCode.PARAMS_ERROR, "账号重复");
+        if (count > 0)
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "账号重复");
         //密码加密
         String encryPassword = getEncryptPassword(userPassword);
         //存入数据库
@@ -60,8 +70,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         boolean result = this.save(user);
         if (!result) throw new BusinessException(ErrorCode.SYSTEM_ERROR, "系统失误");
         //为用户创建图片个人空间
-//        Long spaceResult=spaceService.addSpace(null, user);
-//        if (spaceResult==0) throw new BusinessException(ErrorCode.SYSTEM_ERROR, "创建空间失败");
+        Long spaceResult = spaceService.addSpace(new SpaceAddRequest("无名", 0, 0), user);
+        if (spaceResult == 0)
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "创建空间失败");
         return user.getId();
     }
 
@@ -92,6 +103,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
         //记录用户的登录态
         request.getSession().setAttribute(USER_LOGIN_STATE, user);
+        //存储到token中
+        StpUtil.login(user.getId());
         return this.getLoginUserVO(user);
     }
 
@@ -123,7 +136,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         Long id = userQueryRequest.getId();
         String userName = userQueryRequest.getUserName();
         String userAccount = userQueryRequest.getUserAccount();
-        String userProfile = userQueryRequest.getUserProfile();
         String userRole = userQueryRequest.getUserRole();
         String sortField = userQueryRequest.getSortField();
         String sortOrder = userQueryRequest.getSortOrder();
@@ -132,7 +144,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         queryWrapper.eq(StrUtil.isNotBlank(userRole), "user_role", userRole);
         queryWrapper.like(StrUtil.isNotBlank(userAccount), "user_account", userAccount);
         queryWrapper.like(StrUtil.isNotBlank(userName), "user_name", userName);
-        queryWrapper.like(StrUtil.isNotBlank(userProfile), "user_profile", userProfile);
         // 排序规则
         queryWrapper.orderBy(SqlUtils.validSortField(sortField),
                 sortOrder.equals(CommonConstant.SORT_ORDER_ASC),
@@ -142,7 +153,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Override
     public UserVO getUserVO(User user) {
-        ThrowUtils.throwIf(user == null, ErrorCode.NOT_FOUND_ERROR);
+        ThrowUtils.throwIf(user == null, ErrorCode.NOT_FOUND_ERROR,"用户不存在");
         UserVO userVO = new UserVO();
         BeanUtils.copyProperties(user, userVO);
         return userVO;

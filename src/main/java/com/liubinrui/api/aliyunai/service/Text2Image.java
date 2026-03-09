@@ -64,12 +64,4 @@ public class Text2Image {
         return imageUrl;
     }
 
-
-//    public static void main(String[] args) {
-//        try {
-//            basicCall(prompt);
-//        } catch (ApiException | NoApiKeyException e) {
-//            System.out.println(e.getMessage());
-//        }
-//    }
 }

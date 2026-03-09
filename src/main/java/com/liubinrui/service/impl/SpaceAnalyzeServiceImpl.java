@@ -79,7 +79,7 @@ public class SpaceAnalyzeServiceImpl implements SpaceAnalyzeService {
             //统计公共空间的资源使用
             QueryWrapper<Picture> queryWrapper = new QueryWrapper<>();
             if (!spaceUsageAnalyzeRequest.isQueryAll()) {
-                queryWrapper.isNull("spaceId");
+                queryWrapper.isNull("space_id");
             }
             //sleect使用SQL函数
             queryWrapper.select("SUM(pic_size) as total_size", "COUNT(1) as total_count");
@@ -138,8 +138,8 @@ public class SpaceAnalyzeServiceImpl implements SpaceAnalyzeService {
         QueryWrapper<Picture> queryWrapper = new QueryWrapper<>();
         //根据范围补充查询条件
         fillAnalyzeQueryWrapper(spaceCategoryAnalyzeRequest, queryWrapper);
-        queryWrapper.select("category AS category", "COUNT(*) AS count",
-                        "SUM(pic_size) AS totalSize")
+        queryWrapper.select("category as category", "COUNT(*) as count",
+                        "SUM(pic_size) as totalSize")
                 .groupBy("category");
         List<Map<String, Object>> maps = pictureService.getBaseMapper().selectMaps(queryWrapper);
         List<SpaceCategoryAnalyzeResponse> responseList = new ArrayList<>();
@@ -236,7 +236,7 @@ public class SpaceAnalyzeServiceImpl implements SpaceAnalyzeService {
                 throw new BusinessException(ErrorCode.PARAMS_ERROR, "不支持的时间范围类型: " + rangeType);
         }
         QueryWrapper<Picture> queryWrapper = new QueryWrapper<>();
-        queryWrapper.select("user_id", "COUNT(*) AS uploadCount")
+        queryWrapper.select("user_id", "COUNT(*) as uploadCount")
                 // 假设图片表有逻辑删除字段 isDelete，确保只统计未删除的
                 .eq("is_delete", 0)
                 // 核心过滤：创建时间 >= 自然周期起点
@@ -264,7 +264,7 @@ public class SpaceAnalyzeServiceImpl implements SpaceAnalyzeService {
     public List<SpaceBankAnalyzeResponse> getSpaceRankAnalyze(SpaceRankAnalyzeRequest spaceRankAnalyzeRequest, User loginUser) {
         QueryWrapper<Space> queryWrapper = new QueryWrapper<>();
         List<SpaceBankAnalyzeResponse> spaceBankAnalyzeResponseList = new ArrayList<>();
-        queryWrapper.select("id", "(total_size * 1.0/max_size) AS sizeRate")
+        queryWrapper.select("id", "(total_size * 1.0/max_size) as sizeRate")
                 .orderByDesc("sizeRate")
                 .last("LIMIT 100");
         List<Map<String, Object>> resultMaps = spaceService.getBaseMapper().selectMaps(queryWrapper);
@@ -273,7 +273,7 @@ public class SpaceAnalyzeServiceImpl implements SpaceAnalyzeService {
             Long spaceId = (spaceIdObj == null) ? 0L : Long.parseLong(spaceIdObj.toString());
             Object sizeRateObj = row.get("sizeRate");
             Double sizeRate = (sizeRateObj == null) ? 0 : Double.parseDouble(sizeRateObj.toString());
-            spaceBankAnalyzeResponseList.add(new SpaceBankAnalyzeResponse(spaceId,sizeRate));
+            spaceBankAnalyzeResponseList.add(new SpaceBankAnalyzeResponse(spaceId, sizeRate));
         }
         return spaceBankAnalyzeResponseList;
     }

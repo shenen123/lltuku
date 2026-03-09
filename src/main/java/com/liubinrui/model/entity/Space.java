@@ -6,22 +6,13 @@ import lombok.Data;
 import java.io.Serializable;
 import java.util.Date;
 
-/**
- * 空间
- * @TableName space
- */
 @TableName(value ="space")
 @Data
 public class Space implements Serializable {
-    /**
-     * id
-     */
+
     @TableId(type = IdType.ASSIGN_ID)
     private Long id;
 
-    /**
-     * 空间名称
-     */
     private String spaceName;
 
     /**
@@ -29,14 +20,8 @@ public class Space implements Serializable {
      */
     private Integer spaceLevel;
 
-    /**
-     * 空间图片的最大总大小
-     */
     private Long maxSize;
 
-    /**
-     * 空间图片的最大数量
-     */
     private Long maxCount;
 
     /**
@@ -49,24 +34,12 @@ public class Space implements Serializable {
      */
     private Long totalCount;
 
-    /**
-     * 创建用户 id
-     */
     private Long userId;
 
-    /**
-     * 创建时间
-     */
     private Date createTime;
 
-    /**
-     * 编辑时间
-     */
     private Date editTime;
 
-    /**
-     * 更新时间
-     */
     private Date updateTime;
 
     /**
@@ -74,10 +47,6 @@ public class Space implements Serializable {
      */
     private Integer spaceType;
 
-
-    /**
-     * 是否删除
-     */
     @TableLogic
     private Integer isDelete;
 

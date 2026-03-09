@@ -7,6 +7,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
 public class PictureUtils {
+    //获取缩略图字节
     public static byte[] generateThumbnail(byte[] originalBytes, int maxSize) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         Thumbnails.of(new ByteArrayInputStream(originalBytes))

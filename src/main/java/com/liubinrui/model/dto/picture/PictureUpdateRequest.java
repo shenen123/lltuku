@@ -12,8 +12,6 @@ public class PictureUpdateRequest implements Serializable {
 
     private String name;
 
-    private String introduction;
-
     private String category;
 
     private List<String> tags;

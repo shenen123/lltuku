@@ -2,12 +2,12 @@ package com.liubinrui.controller;
 
 import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
-import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.liubinrui.annotation.AuthCheck;
 import com.liubinrui.api.aliyunai.service.Text2Image;
+import com.liubinrui.auth.SpaceUserAuthManager;
+import com.liubinrui.auth.annotation.CheckSpaceAuth;
 import com.liubinrui.common.BaseResponse;
-import com.liubinrui.common.DeleteRequest;
 import com.liubinrui.common.ResultUtils;
 import com.liubinrui.constant.UserConstant;
 import com.liubinrui.enums.PictureReviewStatusEnum;
@@ -56,7 +56,11 @@ public class PictureController {
     @Resource
     private Text2Image text2Image;
 
+    @Resource
+    private SpaceUserAuthManager authManager;
+
     @PostMapping("/upload/file")
+    @CheckSpaceAuth(idParam = "pictureUploadRequest.spaceId")
     public BaseResponse<PictureVO> uploadPictureByFile(
             @RequestPart("file") MultipartFile multipartFile,
             @ParameterObject PictureUploadRequest pictureUploadRequest,
@@ -65,9 +69,9 @@ public class PictureController {
         ThrowUtils.throwIf(multipartFile == null, ErrorCode.NOT_FOUND_ERROR);
         User loginUser = userService.getLoginUser(request);
         ThrowUtils.throwIf(loginUser == null, ErrorCode.NO_AUTH_ERROR);
-
-        //2.检验空间是否存在
         Long spaceId = pictureUploadRequest.getSpaceId();
+        authManager.checkPermission(spaceId, "picture:upload");
+        //2.检验空间是否存在
         if (spaceId != null) {
             Space space = spaceService.getById(spaceId);
             ThrowUtils.throwIf(space == null, ErrorCode.NOT_FOUND_ERROR, "空间不存在");
@@ -88,6 +92,7 @@ public class PictureController {
     }
 
     @PostMapping("/upload/url")
+    @CheckSpaceAuth(idParam = "pictureUploadRequest.spaceId")
     public BaseResponse<PictureVO> uploadPictureByUrl(
             @RequestBody PictureUploadRequest pictureUploadRequest,
             HttpServletRequest request) {
@@ -95,6 +100,7 @@ public class PictureController {
         ThrowUtils.throwIf(pictureUploadRequest == null, ErrorCode.NOT_FOUND_ERROR);
         User loginUser = userService.getLoginUser(request);
         Long spaceId = pictureUploadRequest.getSpaceId();
+        authManager.checkPermission(spaceId, "picture:upload");
         String url = pictureUploadRequest.getFileUrl();
         ThrowUtils.throwIf(StrUtil.isEmpty(url), ErrorCode.NOT_FOUND_ERROR);
         //2.空间ID不为零，则检验
@@ -119,12 +125,15 @@ public class PictureController {
 
 
     @PostMapping("/delete")
-    public BaseResponse<Boolean> deletePicture(@RequestBody DeleteRequest deleteRequest, HttpServletRequest request) {
-        if (deleteRequest == null || deleteRequest.getId() <= 0) {
+    @CheckSpaceAuth(idParam = "deleteRequest.spaceId")
+    public BaseResponse<Boolean> deletePicture(@RequestBody PictureDeleteRequest deleteRequest, HttpServletRequest request) {
+        if (deleteRequest == null) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
+        Long spaceId = deleteRequest.getSpaceId();
+        authManager.checkPermission(spaceId, "picture:delete");
         User loginUser = userService.getLoginUser(request);
-        long pictureId = deleteRequest.getId();
+        Long pictureId = deleteRequest.getId();
         Picture oldPicture = pictureService.getById(pictureId);
         //1.数据检验
         ThrowUtils.throwIf(ObjUtil.isEmpty(pictureId) || oldPicture == null, ErrorCode.NOT_FOUND_ERROR);
@@ -132,12 +141,14 @@ public class PictureController {
         pictureService.checkPictureAuth(loginUser, oldPicture);
         // 3.开启事务
         transactionTemplate.executeWithoutResult(status -> {
-            //3.1移除图片
+            // 3.1移除图片
             boolean result = pictureService.removeById(oldPicture.getId());
             ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
             // 3.2释放额度
-            Long spaceId = oldPicture.getSpaceId();
             if (spaceId != null) {
+                //确保输入的和原图的一致
+                ThrowUtils.throwIf(!oldPicture.getSpaceId().equals(spaceId),
+                        ErrorCode.PARAMS_ERROR, "请求的空间与原图空间不一致");
                 boolean update = spaceService.lambdaUpdate()
                         .eq(Space::getId, spaceId)
                         .setSql("total_size = total_size - " + oldPicture.getPicSize())
@@ -149,59 +160,19 @@ public class PictureController {
         return ResultUtils.success(true);
     }
 
-    @PostMapping("/update")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
-    //留一个悬念，到底是不是只有空间创始人才能修改
-    public BaseResponse<Boolean> updatePicture(@RequestBody PictureUpdateRequest pictureUpdateRequest, HttpServletRequest request) {
-        if (pictureUpdateRequest == null || pictureUpdateRequest.getId() <= 0) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR);
-        }
-        User loginUser = userService.getLoginUser(request);
-        Long pictureId = pictureUpdateRequest.getId();
-        Picture oldPicture = pictureService.getById(pictureId);
-        //检验空间是否一致,没有传spaceId,则复原有图片的spaceId
-        Long spaceId = pictureUpdateRequest.getSpaceId();
-        if (spaceId != null) {
-            if (spaceId != oldPicture.getSpaceId())
-                throw new BusinessException(ErrorCode.PARAMS_ERROR, "空间id不一致");
-        } else spaceId = oldPicture.getSpaceId();
-        Space space = spaceService.getById(spaceId);
-        if (space.getSpaceType().equals(0)) {
-            // 必须空间创建人才能修改
-            if (pictureId != null) {
-                ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
-                //必须为本人或管理员才可更新
-                if (!oldPicture.getUserId().equals(loginUser.getId()) && !userService.isAdmin(loginUser)) {
-                    throw new BusinessException(ErrorCode.SYSTEM_ERROR.NO_AUTH_ERROR);
-                }
-            }
-        }
-        //小组的公共区域
-        else {
-            System.out.println(0);
-        }
-
-        //补充参数
-        Picture picture = new Picture();
-        BeanUtils.copyProperties(pictureUpdateRequest, picture);
-        picture.setTagsJson(JSONUtil.toJsonStr(pictureUpdateRequest.getTags()));
-        picture.setSpaceId(spaceId);
-        // 数据校验
-        pictureService.validPicture(picture, false);
-        //补充审核信息
-        pictureService.fillReviewParams(picture, loginUser);
-        // 操作数据库
-        boolean result = pictureService.updateById(picture);
-        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
-        return ResultUtils.success(true);
-    }
-
-    @GetMapping("/get/vo")
-    public BaseResponse<PictureVO> getPictureVOById(long id, HttpServletRequest request) {
-        ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
+    @PostMapping("/get/vo")
+    @CheckSpaceAuth(idParam = "pictureGetRequest.spaceId")
+    public BaseResponse<PictureVO> getPictureVOById(@RequestBody PictureGetRequest pictureGetRequest, HttpServletRequest request) {
+        ThrowUtils.throwIf(pictureGetRequest == null, ErrorCode.PARAMS_ERROR);
+        Long spaceId = pictureGetRequest.getSpaceId();
+        Long checkSpaceId = spaceId == null ? 0L : spaceId;
+        authManager.checkPermission(checkSpaceId, "picture:view");
+        User loginUser=userService.getLoginUser(request);
         // 查询数据库
-        Picture picture = pictureService.getById(id);
+        Picture picture = pictureService.getById(pictureGetRequest.getPictureId());
         ThrowUtils.throwIf(picture == null, ErrorCode.NOT_FOUND_ERROR);
+        //2.检测权限
+        pictureService.checkPictureAuth(loginUser, picture);
         // 获取封装类
         return ResultUtils.success(pictureService.getPictureVO(picture, request));
     }
@@ -218,10 +189,13 @@ public class PictureController {
     }
 
     @PostMapping("/list/page/vo")
+    @CheckSpaceAuth(idParam = "pictureQueryRequest.spaceId")
     public BaseResponse<Page<PictureVO>> listPictureVOByPage(@RequestBody PictureQueryRequest pictureQueryRequest,
                                                              HttpServletRequest request) {
         long current = pictureQueryRequest.getCurrent();
         long size = pictureQueryRequest.getPageSize();
+        Long spaceId = pictureQueryRequest.getSpaceId();
+        authManager.checkPermission(spaceId, "picture:view");
         // 限制爬虫
         ThrowUtils.throwIf(size > 20, ErrorCode.PARAMS_ERROR);
         // 查询数据库
@@ -250,25 +224,27 @@ public class PictureController {
         return ResultUtils.success(pictureService.getPictureVOPage(picturePage, request));
     }
 
+    //更新图片
     @PostMapping("/edit")
+    @CheckSpaceAuth(idParam = "pictureEditRequest.spaceId")
     public BaseResponse<Boolean> editPicture(@RequestBody PictureEditRequest pictureEditRequest, HttpServletRequest
             request) {
         if (pictureEditRequest == null || pictureEditRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
+        Long spaceId = pictureEditRequest.getSpaceId();
+        authManager.checkPermission(spaceId, "picture:edit");
         Picture picture = new Picture();
         BeanUtils.copyProperties(pictureEditRequest, picture);
-        // 数据校验
-        pictureService.validPicture(picture, false);
         User loginUser = userService.getLoginUser(request);
         // 判断是否存在
         long id = pictureEditRequest.getId();
         Picture oldPicture = pictureService.getById(id);
         ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR);
-        // 仅本人或管理员可编辑
-        if (!oldPicture.getUserId().equals(loginUser.getId()) && !userService.isAdmin(loginUser)) {
-            throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
-        }
+        //2.检测权限
+        pictureService.checkPictureAuth(loginUser, picture);
+        //补充审核信息
+        pictureService.fillReviewParams(picture,loginUser);
         // 操作数据库
         boolean result = pictureService.updateById(picture);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
@@ -300,18 +276,19 @@ public class PictureController {
     @PostMapping("/list/page/vo/cache")
     public BaseResponse<Page<PictureVO>> listPictureVOByPageWithCache(@RequestBody PictureQueryRequest pictureQueryRequest,
                                                                       HttpServletRequest request) {
-        long current = pictureQueryRequest.getCurrent();
         long size = pictureQueryRequest.getPageSize();
         //限制爬虫
         ThrowUtils.throwIf(size > 20, ErrorCode.PARAMS_ERROR);
 
         Long spaceId = pictureQueryRequest.getSpaceId();
+        //2.检测权限
+        User loginUser = userService.getLoginUser(request);
+        //pictureService.checkPictureAuth(loginUser, picture);
         if (spaceId == null) {
             //公共空间的普通用户可以查看过审的
             pictureQueryRequest.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
             pictureQueryRequest.setNullSpaceId(true);
         } else {
-            User loginUser = userService.getLoginUser(request);
             Space space = spaceService.getById(spaceId);
             ThrowUtils.throwIf(space == null, ErrorCode.NOT_FOUND_ERROR, "空间不存在");
             //非空间创建者不能查看
@@ -342,19 +319,19 @@ public class PictureController {
         pictureService.batchEditPicture(pictureEditByBatchRequest, loginUser);
         return ResultUtils.success(true);
     }
-
+    //文生图
     @PostMapping("/text/image")
     @AuthCheck(mustRole = UserConstant.VIP_ROLE)
     public BaseResponse<String> getImageFromText(String prompt, HttpServletRequest request) {
-        // 1. 参数校验
+        // 1.参数校验
         ThrowUtils.throwIf(prompt == null, ErrorCode.PARAMS_ERROR);
-
-        // 2. 获取登录用户 (保持原有逻辑)
+        // 2.获取登录用户 (保持原有逻辑)
         User loginUser = userService.getLoginUser(request);
-
+        // 3.必须VIP用户才可使用
+        ThrowUtils.throwIf(!loginUser.getUserRole().equals(UserConstant.VIP_ROLE),ErrorCode.NO_AUTH_ERROR,"仅限VIP用户使用此功能");
         String imageUrl;
         try {
-            // 3. 【关键修改】包裹在 try-catch 中
+            // 3.包裹在 try-catch 中
             imageUrl = text2Image.basicCall(prompt);
         } catch (com.alibaba.dashscope.exception.NoApiKeyException e) {
             // 处理 Key 缺失或无效的情况
@@ -363,14 +340,12 @@ public class PictureController {
         } catch (com.alibaba.dashscope.exception.ApiException e) {
             // 处理 API 调用失败（如网络错误、模型报错、额度不足等）
             e.printStackTrace();
-            // 可以根据 e.getMessage() 判断具体错误，这里统一返回系统错误
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "图片生成失败：" + e.getMessage());
         } catch (Exception e) {
             // 处理其他未知运行时异常
             e.printStackTrace();
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "系统内部错误：" + e.getMessage());
         }
-
         // 4. 返回成功结果
         return ResultUtils.success(imageUrl);
     }

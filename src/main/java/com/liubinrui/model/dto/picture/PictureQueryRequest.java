@@ -12,49 +12,20 @@ import java.util.List;
 @Data
 public class PictureQueryRequest extends PageRequest implements Serializable {
 
-    /**
-     * id
-     */
     private Long id;
 
-    /**
-     * 图片名称
-     */
     private String name;
 
-    /**
-     * 简介
-     */
-    private String introduction;
-
-    /**
-     * 分类
-     */
     private String category;
 
-    /**
-     * 标签
-     */
     private List<String> tags;
 
-    /**
-     * 文件体积
-     */
     private Long picSize;
 
-    /**
-     * 图片宽度
-     */
     private Integer picWidth;
 
-    /**
-     * 图片高度
-     */
     private Integer picHeight;
 
-    /**
-     * 图片比例
-     */
     private Double picScale;
 
     /**
