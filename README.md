@@ -53,20 +53,87 @@
 *   Elasticsearch
 *   AI 推理服务 (如部署了本地 SD 模型)
 
-### 3.3 关键配置文件
-项目包含两个核心配置文件，请根据实际环境修改：
+### 3.3 关键配置文件示例
 
-#### A. `application.yml` (应用主配置)
-主要配置服务端口、中间件连接信息、AI 接口地址等。
-*   **重点修改项**：
-    *   `spring.cloud.nacos.server-addr`: Nacos 地址
-    *   `minio.endpoint`: MinIO 服务地址
-    *   `ai.model.url`: AI 大模型服务接口地址
-    *   `spring.redis.host`: Redis 地址
+# ⚙️ 核心配置文件说明 (Configuration Guide)
 
-#### B. `shardingsphere-config-debug.yaml` (分片规则配置)
-主要配置数据库分片策略、数据源连接。
-*   **重点修改项**：
-    *   `dataSources.ds_0.jdbcUrl`: 数据库连接 URL
-    *   `dataSources.ds_0.username/password`: 数据库账号密码 (**注意脱敏**)
-    *   `rules.SHARDING.tables.thumb.actualDataNodes`: 分表数量配置
+本项目配置分为两部分，均已进行**脱敏处理**。生产环境部署时，请通过环境变量或配置中心（如 Nacos）注入真实值。
+
+1. **`application.yml`**：Spring Boot 应用主配置，包含服务发现、缓存、消息队列及分库分表逻辑。
+2. **`shardingsphere-config-debug.yaml`**：ShardingSphere 独立运行时的调试配置（或作为配置中心的数据源），用于验证分片规则。
+---
+
+## 1. 应用主配置 (`application.yml`)
+
+此文件定义了微服务的基础设施连接及核心业务逻辑参数。
+
+```yaml
+server:
+  port: 8101                      # 服务端口
+  servlet:
+    context-path: /api            # 全局 API 前缀
+spring:
+  application:
+    name: lltuku                  # 应用名称 (用于 Nacos 注册等)
+  profiles:
+    active: local                 # 激活环境：local, dev, prod
+
+  # --- Redis 缓存配置 ---
+  redis:
+    host: ${REDIS_HOST:127.0.0.1} # 支持环境变量覆盖
+    port: 6379
+    database: 0
+    timeout: 5000ms
+
+  # --- ShardingSphere 分库分表配置 ---
+  shardingsphere:
+    datasource:
+      names: yuntuku
+      yuntuku:
+        driver-class-name: com.mysql.cj.jdbc.Driver
+        jdbc-url: jdbc:mysql://${DB_HOST:localhost}:3306/yuntuku?serverTimezone=Asia/Shanghai&...
+        username: ${DB_USERNAME:root}
+        password: ${DB_PASSWORD:1234}
+    rules:
+      sharding:
+        tables:
+          picture:
+            actual-data-nodes: yuntuku.picture_$->{0..1023} # 分表范围：0-1023
+            table-strategy:
+              standard:
+                sharding-column: space_id                   # 分片键
+                sharding-algorithm-name: picture_sharding_algorithm
+        sharding-algorithms:
+          picture_sharding_algorithm:
+            type: CLASS_BASED                               # 自定义分片算法
+            props:
+              algorithmClassName: com.liubinrui.manager.PictureShardingAlgorithm
+
+  # --- 文件上传限制 ---
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 20MB
+
+# --- MyBatis Plus 配置 ---
+mybatis-plus:
+  mapper-locations: classpath:mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: true # 开启驼峰命名映射
+  global-config:
+    db-config:
+      logic-delete-field: isDelete     # 逻辑删除字段
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# --- AI 大模型配置 (DashScope) ---
+dashscope:
+  api-key: ${DASHSCOPE_API_KEY:sk-xxx} # 【重要】请通过环境变量注入真实 Key
+  model: qwen-vl-max                   # 使用的模型版本
+
+# --- API 文档配置 (Knife4j) ---
+knife4j:
+  enable: true
+  openapi:
+    title: "${spring.application.name} 接口文档"
+    version: 1.0.0
